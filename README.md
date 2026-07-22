@@ -1,23 +1,25 @@
 # splitQP
 
-splitQP solves families of dense convex quadratic programs that share the same
-quadratic and constraint matrices while their linear term and bounds change.
-It is intended for readers who want a compact, modifiable implementation of
-ADMM factorization reuse, batching, and warm starts in JAX. The solver,
-reference implementation, correctness tests, and portfolio example are
-complete and have been checked on CPU and CUDA; this is an educational research
-implementation, not a production solver.
+A tiny JAX solver for families of dense convex quadratic programs. It keeps the
+quadratic and constraint matrices fixed while the linear term and bounds vary,
+so one Cholesky factorization serves every ADMM iteration and every QP in the
+batch.
+
+The core solver is 238 lines and includes `vmap` batching, warm starts,
+per-problem stopping, and a readable iteration trace. A 61-line direct
+reference, a portfolio example, and comparisons with hand arithmetic and OSQP
+keep the optimized path checkable. The same tests pass on CPU and CUDA.
 
 ## Quick start
 
-Python 3.12 and [uv](https://docs.astral.sh/uv/) are required.
+Python 3.12 and [uv](https://docs.astral.sh/uv/) are required. From the
+repository root:
 
 ```bash
-uv sync
 uv run python portfolio.py --points 64
 ```
 
-A representative CPU run prints:
+This solves a family of Markowitz portfolio problems and prints:
 
 ```text
 64 QPs, 1 factorization
@@ -54,7 +56,8 @@ use the same projection onto $[l,u]$.
 - warm starts through the state $(x,z,y)$;
 - optional named iteration traces for inspecting the solve, projection, and
   stopping decisions;
-- a correctness ladder from a direct reference implementation to OSQP.
+- step-by-step comparisons with a direct implementation and a final-point
+  comparison with OSQP.
 
 ## Project structure
 
@@ -66,8 +69,9 @@ Read the files in this order:
    step, `vmap`, compiled loop, per-lane stopping, trace, and warm start.
 3. [`portfolio.py`](portfolio.py) (87 lines) solves a 64-member Markowitz
    family and checks batch/scalar agreement and cold/warm iteration counts.
-4. [`test.py`](test.py) (177 lines) contains the hand-audited step, trajectory
-   comparisons, JAX transform checks, batch checks, and OSQP oracle.
+4. [`test.py`](test.py) (177 lines) contains the hand-derived first step,
+   trajectory comparisons, JAX transform checks, batch checks, and OSQP
+   comparison.
 
 ## Design
 
@@ -141,7 +145,7 @@ device-to-host synchronization ([`splitqp.py:230`](splitqp.py#L230)).
 
 ## Validation
 
-Run the compact correctness suite on CPU and on the default JAX device:
+Run the comparisons on CPU and on the default JAX device:
 
 ```bash
 JAX_PLATFORMS=cpu uv run python test.py
@@ -160,8 +164,8 @@ all okay
 The tests compare an exact-fraction first step and every named intermediate of
 the cached path with `reference.py`. They also compare eager and jitted steps,
 `jit(vmap(step))` and scalar stacks, compiled and traced stopping behavior, and
-batched and independently stopped scalar solves. OSQP is used only as an
-external final-point oracle.
+batched and independently stopped scalar solves. The final objectives and KKT
+residuals are also compared with OSQP.
 
 ## Limitations
 
@@ -169,12 +173,9 @@ external final-point oracle.
 - fixed scalar $\rho$ and fixed $P,A$ after setup;
 - no sparse matrices, scaling, adaptive penalty, infeasibility certificate,
   polishing, or matrix updates;
-- no autodiff layer, custom GPU kernel, multi-device execution, or performance
-  guarantee;
+- no autodiff layer, custom GPU kernel, multi-device execution, or sparse
+  performance path;
 - reaching `max_iter` returns `converged=False`; infeasibility is not inferred.
-
-No correctness issue is known for the documented problem class. Inputs outside
-these assumptions are not characterized as production solver statuses.
 
 ## References
 
@@ -183,14 +184,13 @@ these assumptions are not characterized as production solver statuses.
   for the ADMM state, residual interpretation, stopping tests, and warm starts.
 - [Stellato et al., *OSQP: an Operator Splitting Solver for Quadratic
   Programs*](https://arxiv.org/abs/1711.08013) for the box form, proximal term,
-  relaxation, factor reuse, and final-point oracle.
+  relaxation, factor reuse, and final-point comparison.
 - [Bishop et al., *ReLU-QP*](https://arxiv.org/abs/2311.18056) for the
   fixed-point and batched interpretation of this iteration.
 - [JAX documentation](https://docs.jax.dev/) and
-  [JAXopt BoxOSQP at the inspected commit](https://github.com/google/jaxopt/tree/fd852822e8aed93c2e067a348ce5cf3f236d3ed2)
-  for public transform and factor/solve patterns.
+  [JAXopt's BoxOSQP](https://github.com/google/jaxopt) for transform and
+  factor/solve patterns in JAX.
 
 ## License
 
-No license file is currently included. Choose a license before redistribution
-or publication.
+No license file is currently included.
