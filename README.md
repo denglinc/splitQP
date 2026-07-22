@@ -51,6 +51,12 @@ where $P \succeq 0$. A problem family keeps $P$ and $A$ fixed while $q$, $l$,
 and $u$ vary. Equalities, one-sided constraints, and two-sided constraints all
 use the same projection onto $[l,u]$.
 
+![Projection branches across the portfolio family](assets/projection_gates.png)
+
+*At each fixed point, the box projection marks every constraint as lower
+active, free, upper active, or equality. The 64 portfolios produce 24 distinct
+non-budget patterns without changing the factorization.*
+
 ## Usage
 
 ```python
@@ -72,12 +78,9 @@ warm = solver.solve(q2, l2, u2, init=result.state)
   comparison with OSQP, all inside the notebook.
 
 Solving the 64 portfolios in ascending target order, each from the previous
-solution, reuses iterative state on top of the shared factor:
-
-![Cumulative cold versus warm-start iterations](assets/warm_start.png)
-
-*The ordered sweep reuses the previous $(x,z,y)$ and cuts total iterations by
-a quarter while keeping the same Cholesky factor.*
+solution, reuses iterative state on top of the shared factor and reduces the
+canonical sweep from 48,435 cold iterations to 36,184 while keeping the same
+Cholesky factor.
 
 ## Project structure
 
@@ -87,10 +90,11 @@ Two files matter:
    that owns the factored family, and the pure JAX core — scalar step,
    residual report, `vmap` batch, compiled loop with per-lane stopping, and
    trace loop.
-2. [`portfolio.ipynb`](portfolio.ipynb) (16 cells) is the executable record:
+2. [`portfolio.ipynb`](portfolio.ipynb) (18 cells) is the executable record:
    the canonical portfolio family, the fresh-solve reference, the
    exact-fraction audit, the JAX transform and batch checks, the OSQP
-   comparison, and the source of both figures.
+   comparison, and the source of both README figures and the warm-start
+   diagnostic.
 
 ## Design
 
