@@ -203,7 +203,7 @@ def solve_batch(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_it
 def solve(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_iter=4000,
           trace=False):
     """Solve one QP.  trace=True runs the same jitted step from a host loop and
-    records every named intermediate (for the demo's detailed panels)."""
+    records every named intermediate for trajectory inspection."""
     m, n = cache.A.shape
     q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
     assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)

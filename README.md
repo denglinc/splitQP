@@ -5,10 +5,8 @@
 splitQP is a tiny JAX ADMM solver for a family of dense box QPs with fixed
 `P, A` and changing `q, l, u`. Factor once; then every iteration is
 `solve -> clip -> dual correction`, for one QP or a whole batch. I wanted that
-reuse to be visible in the code, the trace, and the picture — not buried under
-a general solver API.
-
-![one factorization, one QP family](portfolio.png)
+reuse to be visible in the code and the trace — not buried under a general
+solver API.
 
 ## feel the magic
 
@@ -17,16 +15,17 @@ uv sync
 uv run python portfolio.py --points 64
 ```
 
+A representative CUDA run prints:
+
 ```text
 64 QPs, 1 factorization
 max KKT residual: 2.00e-06
 batch/scalar difference: 9.49e-15
 cold iterations vs warm sequence: 48435 vs 36184
-wrote portfolio.png
 ```
 
-Every number above is asserted by the demo before it is printed, and the PNG
-is drawn from the same solver trace the assertions checked.
+Every number above is asserted by the demo before it is printed. The last few
+floating-point digits can vary across devices or separate XLA compilations.
 
 ## the files that matter
 
@@ -37,8 +36,8 @@ Read them in this order:
 2. [`splitqp.py`](splitqp.py) (238 lines) — the same equations with one cached
    Cholesky, one pure step, leading-axis `vmap`, a compiled `while_loop`, and
    warm-startable `(x, z, y)` state;
-3. [`portfolio.py`](portfolio.py) (170 lines) — one complete family
-   experiment: frontier, cold/warm sweep, residual trace, projection raster;
+3. [`portfolio.py`](portfolio.py) (87 lines) — one complete family experiment:
+   batch versus scalar solves and a cold/warm sweep over 64 target returns;
 4. [`test.py`](test.py) (177 lines) — hand-audited first step, reference
    trajectory, batch, and OSQP oracle.
 
@@ -88,21 +87,6 @@ accepted stop ([`splitqp.py:181`](splitqp.py#L181)); the explanatory trace
 drives the same jitted step from a host loop and synchronizes explicitly
 ([`splitqp.py:230`](splitqp.py#L230)). JIT compiles a pure fixed-shape
 program per input shape; it does not remove compilation cost.
-
-## read the picture
-
-- **A. efficient frontier** — all 64 answers of the family, priced by one
-  factorization; the ring marks the member the detailed panels use.
-- **B. cold vs warm** — matrix work is reused by both curves; solution state
-  is reused only by the warm sequence, which needs 36184 instead of 48435
-  iterations for the same sweep.
-- **C. residuals vs tolerances** — semilog primal/dual residual norms against
-  their moving absolute-plus-relative thresholds; the dotted line is the first
-  iteration where both pass.
-- **D. projection gate** — for each constraint and iteration, whether the
-  pre-clip value `v = z_bar + y/rho` is lower-clipped, free, upper-clipped, or
-  an equality row: the box projection as an observable state machine, and the
-  reason the fixed-point view of ADMM (ReLU-QP) is more than a metaphor.
 
 ## correctness
 
