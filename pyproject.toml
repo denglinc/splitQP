@@ -13,7 +13,10 @@ cuda = [
 ]
 
 [dependency-groups]
-dev = [
+notebook = [
+    "ipykernel>=6,<7",
+    "matplotlib>=3.8,<4",
+    "nbclient>=0.9,<1",
     "osqp>=1.0,<2",
 ]
 
