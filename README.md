@@ -20,8 +20,8 @@ JAX_PLATFORMS=cpu uv run --group notebook jupyter execute portfolio.ipynb
 ```
 
 This runs [`portfolio.ipynb`](portfolio.ipynb) top to bottom: it solves a
-64-member Markowitz family, regenerates both figures, and asserts every claim
-before printing:
+64-member Markowitz family, regenerates both figures, runs the validation
+checks, and prints:
 
 ```text
 64 QPs, 1 factorization
@@ -31,7 +31,7 @@ cold iterations vs warm sequence: 48435 vs 36184
 ```
 
 Opening the notebook shows the rest: a fresh-solve ADMM reference, an
-exact-fraction first-step audit, and the full validation ladder. The final
+exact-fraction first-step audit, and additional validation checks. The final
 floating-point digits may vary across devices or separate XLA compilations.
 On a compatible NVIDIA system, install the optional CUDA backend with
 `uv sync --extra cuda`.
@@ -79,19 +79,16 @@ warm = solver.solve(q2, l2, u2, init=result.state)
 
 Solving the 64 portfolios in ascending target order, each from the previous
 solution, reuses iterative state on top of the shared factor and reduces the
-canonical sweep from 48,435 cold iterations to 36,184 while keeping the same
+example sweep from 48,435 cold iterations to 36,184 while keeping the same
 Cholesky factor.
 
 ## Project structure
 
-Two files matter:
-
-1. [`splitqp.py`](splitqp.py) (244 lines) is the solver: the `Solver` facade
-   that owns the factored family, and the pure JAX core — scalar step,
-   residual report, `vmap` batch, compiled loop with per-lane stopping, and
-   trace loop.
-2. [`portfolio.ipynb`](portfolio.ipynb) (18 cells) is the executable record:
-   the canonical portfolio family, the fresh-solve reference, the
+1. [`splitqp.py`](splitqp.py) (244 lines) contains the `Solver`, scalar ADMM
+   step, residual calculation, `vmap` batch, compiled loop with per-lane
+   stopping, and trace loop.
+2. [`portfolio.ipynb`](portfolio.ipynb) (18 cells) contains the portfolio
+   example, the fresh-solve reference, the
    exact-fraction audit, the JAX transform and batch checks, the OSQP
    comparison, and the source of both README figures and the warm-start
    diagnostic.
