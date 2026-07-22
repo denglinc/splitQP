@@ -75,73 +75,9 @@ Read the files in this order:
 
 ## Design
 
-For positive fixed scalars $\rho$ and $\sigma$, and $\alpha\in(0,2)$, setup
-forms
-
-```math
-H = P + \sigma I + \rho A^\top A
-```
-
-and factorizes $H$ once. Each iteration then evaluates
-
-```math
-\begin{aligned}
-H\tilde{x}^{k+1}
-    &= \sigma x^k-q+A^\top(\rho z^k-y^k), \\
-\tilde{z}^{k+1} &= A\tilde{x}^{k+1}, \\
-x^{k+1} &= \alpha\tilde{x}^{k+1}+(1-\alpha)x^k, \\
-\bar{z}^{k+1} &= \alpha\tilde{z}^{k+1}+(1-\alpha)z^k, \\
-z^{k+1} &= \Pi_{[l,u]}\left(\bar{z}^{k+1}+y^k/\rho\right), \\
-y^{k+1} &= y^k+\rho\left(\bar{z}^{k+1}-z^{k+1}\right).
-\end{aligned}
-```
-
-The first equation is solved with the cached Cholesky factor; the implementation
-never forms $H^{-1}$. Fixed $\rho$ is deliberate: changing it would change $H$
-and require a new factorization.
-
-Termination is based on the original-coordinate KKT residuals
-
-```math
-r_{\mathrm{pri}} = Ax-z,
-\qquad
-r_{\mathrm{dual}} = Px+q+A^\top y,
-```
-
-with absolute-plus-relative infinity-norm thresholds
-
-```math
-\begin{aligned}
-\epsilon_{\mathrm{pri}}
-    &= \epsilon_{\mathrm{abs}}
-       +\epsilon_{\mathrm{rel}}
-        \max\!\left(\lVert Ax\rVert_\infty,\lVert z\rVert_\infty\right), \\
-\epsilon_{\mathrm{dual}}
-    &= \epsilon_{\mathrm{abs}}
-       +\epsilon_{\mathrm{rel}}
-        \max\!\left(\lVert Px\rVert_\infty,
-                     \lVert A^\top y\rVert_\infty,
-                     \lVert q\rVert_\infty\right).
-\end{aligned}
-```
-
-The projection also enforces the normal-cone condition
-$z=\Pi_{[l,u]}(z+y/\rho)$ at every accepted iterate.
-
-### JAX implementation
-
-The module enables float64 before creating arrays
-([`splitqp.py:17`](splitqp.py#L17)). Setup stores only the factor array returned
-by `cho_factor` ([`splitqp.py:112`](splitqp.py#L112)), and the step reuses it via
-`cho_solve((factor, True), rhs)` ([`splitqp.py:122`](splitqp.py#L122)). The
-literal `True` keeps the triangular orientation static under JAX transforms.
-
-`jax.vmap` shares $P$, $A$, and the factor while mapping each problem's data
-and state ([`splitqp.py:147`](splitqp.py#L147)). The compiled solve uses a
-fixed-shape `lax.while_loop`; a done mask freezes each lane at its first
-accepted stopping point ([`splitqp.py:181`](splitqp.py#L181)). The trace path
-calls the same jitted step from a Python loop and performs an explicit
-device-to-host synchronization ([`splitqp.py:230`](splitqp.py#L230)).
+The design follows Sections 3–3.2, “Solution with ADMM” through “Final
+algorithm” (pp. 6–8), of [*OSQP: An Operator Splitting Solver for Quadratic
+Programs*](https://arxiv.org/pdf/1711.08013).
 
 ## Validation
 
