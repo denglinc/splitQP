@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.jax_cache/
+*.pyc
+
+# Local research/development instructions; final repo history stays the artifact.
+/CLAUDE.md
+/RESEARCH.md
+/papers/
+/repos/
