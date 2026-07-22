@@ -2,13 +2,13 @@
 
 A tiny JAX solver for families of dense convex quadratic programs with fixed
 quadratic and constraint matrices. It implements proximal ADMM: one Cholesky
-factorization serves every iteration and every QP while the linear term and
-bounds vary.
+factorization, performed when the `Solver` is constructed, serves every
+iteration and every QP while the linear term and bounds vary.
 
-The core solver is 238 lines and includes `vmap` batching, warm starts,
-per-problem stopping, and a readable iteration trace. A 61-line direct
-reference, a portfolio example, and comparisons with hand arithmetic and OSQP
-keep the optimized path checkable. The same tests pass on CPU and CUDA.
+![Efficient frontier from one factorization](assets/frontier.png)
+
+*The 64 solutions above share $P$, $A$, and one Cholesky factor; only the
+target-return bound changes between them.*
 
 ## Quick start
 
@@ -16,10 +16,12 @@ Python 3.12 and [uv](https://docs.astral.sh/uv/) are required. From the
 repository root:
 
 ```bash
-uv run python portfolio.py --points 64
+JAX_PLATFORMS=cpu uv run --group notebook jupyter execute portfolio.ipynb
 ```
 
-This solves a family of Markowitz portfolio problems and prints:
+This runs [`portfolio.ipynb`](portfolio.ipynb) top to bottom: it solves a
+64-member Markowitz family, regenerates both figures, and asserts every claim
+before printing:
 
 ```text
 64 QPs, 1 factorization
@@ -28,9 +30,11 @@ batch/scalar difference: 3.44e-15
 cold iterations vs warm sequence: 48435 vs 36184
 ```
 
-The example asserts every reported result. The final floating-point digits may
-vary across devices or separate XLA compilations. On a compatible NVIDIA
-system, install the optional CUDA backend with `uv sync --extra cuda`.
+Opening the notebook shows the rest: a fresh-solve ADMM reference, an
+exact-fraction first-step audit, and the full validation ladder. The final
+floating-point digits may vary across devices or separate XLA compilations.
+On a compatible NVIDIA system, install the optional CUDA backend with
+`uv sync --extra cuda`.
 
 ## Problem
 
@@ -47,31 +51,46 @@ where $P \succeq 0$. A problem family keeps $P$ and $A$ fixed while $q$, $l$,
 and $u$ vary. Equalities, one-sided constraints, and two-sided constraints all
 use the same projection onto $[l,u]$.
 
-## Main features
+## Usage
+
+```python
+solver = splitqp.Solver(P, A)                   # the one factorization
+result = solver.solve(q, l, u)                  # one QP
+family = solver.solve_batch(qs, ls, us)         # B QPs sharing the factor
+result, trace = solver.trace(q, l, u)           # named per-iteration record
+warm = solver.solve(q2, l2, u2, init=result.state)
+```
 
 - one Cholesky factorization shared by every ADMM iteration and every member of
   a problem family;
 - a single scalar `step` transformed into a leading-axis batch with `jax.vmap`;
 - a compiled `jax.lax.while_loop` with independently stopped batch lanes;
 - warm starts through the state $(x,z,y)$;
-- optional named iteration traces for inspecting the solve, projection, and
-  stopping decisions;
+- named iteration traces for inspecting the solve, projection, and stopping
+  decisions;
 - step-by-step comparisons with a direct implementation and a final-point
-  comparison with OSQP.
+  comparison with OSQP, all inside the notebook.
+
+Solving the 64 portfolios in ascending target order, each from the previous
+solution, reuses iterative state on top of the shared factor:
+
+![Cumulative cold versus warm-start iterations](assets/warm_start.png)
+
+*The ordered sweep reuses the previous $(x,z,y)$ and cuts total iterations by
+a quarter while keeping the same Cholesky factor.*
 
 ## Project structure
 
-Read the files in this order:
+Two files matter:
 
-1. [`reference.py`](reference.py) (61 lines) implements the six ADMM equations
-   in eager JAX and calls a fresh dense solve at every iteration.
-2. [`splitqp.py`](splitqp.py) (238 lines) adds the cached Cholesky factor, pure
-   step, `vmap`, compiled loop, per-lane stopping, trace, and warm start.
-3. [`portfolio.py`](portfolio.py) (87 lines) solves a 64-member Markowitz
-   family and checks batch/scalar agreement and cold/warm iteration counts.
-4. [`test.py`](test.py) (177 lines) contains the hand-derived first step,
-   trajectory comparisons, JAX transform checks, batch checks, and OSQP
-   comparison.
+1. [`splitqp.py`](splitqp.py) (271 lines) is the solver: the `Solver` facade
+   that owns the factored family, and the pure JAX core — scalar step,
+   residual report, `vmap` batch, compiled loop with per-lane stopping, and
+   trace loop.
+2. [`portfolio.ipynb`](portfolio.ipynb) (16 cells) is the executable record:
+   the canonical portfolio family, the fresh-solve reference, the
+   exact-fraction audit, the JAX transform and batch checks, the OSQP
+   comparison, and the source of both figures.
 
 ## Design
 
@@ -81,32 +100,25 @@ Programs*](https://arxiv.org/pdf/1711.08013).
 
 ## Validation
 
-Run the comparisons on CPU and on the default JAX device:
+Execute the notebook on CPU and on the default JAX device:
 
 ```bash
-JAX_PLATFORMS=cpu uv run python test.py
-uv run python test.py
+JAX_PLATFORMS=cpu uv run --group notebook jupyter execute portfolio.ipynb
+uv run --group notebook jupyter execute portfolio.ipynb
 ```
 
-The CPU run prints:
-
-```text
-trajectory okay (3751 iterations, 30 audited against reference)
-batch okay (5 QPs, iterations [722, 3041, 1886, 1189, 23410], 1 factorization)
-OSQP okay (objectives and KKT residuals agree)
-all okay
-```
-
-The tests compare an exact-fraction first step and every named intermediate of
-the cached path with `reference.py`. They also compare eager and jitted steps,
-`jit(vmap(step))` and scalar stacks, compiled and traced stopping behavior, and
-batched and independently stopped scalar solves. The final objectives and KKT
-residuals are also compared with OSQP.
+Its visible assertions compare an exact-fraction first step and 30 iterations
+of every named intermediate of the cached path with a reference that re-solves
+the linear system from scratch each iteration. They also compare eager and
+jitted steps, `jit(vmap(step))` and scalar stacks, compiled and traced
+stopping behavior, and batched lanes with independently stopped scalar solves,
+iteration counts included. The final objectives and KKT residuals are checked
+against OSQP.
 
 ## Limitations
 
 - dense, feasible, well-scaled convex QPs only;
-- fixed scalar $\rho$ and fixed $P,A$ after setup;
+- fixed scalar $\rho$ and fixed $P,A$ after construction;
 - no sparse matrices, scaling, adaptive penalty, infeasibility certificate,
   polishing, or matrix updates;
 - no autodiff layer, custom GPU kernel, multi-device execution, or sparse
