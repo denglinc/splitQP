@@ -1,15 +1,4 @@
-"""splitQP: one cached Cholesky, many box QPs.
-
-    minimize    1/2 x'Px + q'x
-    subject to  l <= Ax <= u
-
-Solver(P, A) factors H = P + sigma*I + rho*A'A exactly once, at construction.
-After that, every ADMM iteration is one triangular solve, a box projection,
-and a dual update -- for one QP or a whole batch that shares P and A and
-varies only q, l, u.  The mathematical core is the module-level pure
-functions below; Solver is a thin host-side facade that owns the factored
-family and never enters jit.
-"""
+"""A tiny JAX implementation of proximal ADMM for box-form QPs."""
 
 from typing import NamedTuple
 
@@ -23,7 +12,7 @@ from jax.scipy.linalg import cho_factor, cho_solve
 
 
 class Cache(NamedTuple):
-    """Setup product shared by the whole QP family; vmap never maps it."""
+    """Fixed matrices and their shared Cholesky factor."""
     P: jax.Array
     A: jax.Array
     factor: jax.Array  # lower-triangular Cholesky factor of H
@@ -33,16 +22,14 @@ class Cache(NamedTuple):
 
 
 class State(NamedTuple):
-    """The warm-startable iterate. JAX arrays are immutable, so a step returns
-    a fresh State instead of mutating this one."""
+    """Warm-startable ADMM iterate."""
     x: jax.Array
     z: jax.Array
     y: jax.Array
 
 
 class Parts(NamedTuple):
-    """Named intermediates of one step: the causal boundary between the reused
-    linear solve and the piecewise-linear projection."""
+    """Named intermediates from one ADMM step."""
     rhs: jax.Array
     x_tilde: jax.Array
     z_tilde: jax.Array
@@ -51,7 +38,7 @@ class Parts(NamedTuple):
 
 
 class Report(NamedTuple):
-    """Residuals, tolerances, objective, and the stop decision for one state."""
+    """Residuals and stopping data for one state."""
     r_primal: jax.Array
     r_dual: jax.Array
     eps_primal: jax.Array
@@ -61,7 +48,7 @@ class Report(NamedTuple):
 
 
 class Trace(NamedTuple):
-    """Per-iteration snapshots (leading axis = iteration) from Solver.trace."""
+    """Iteration records stacked along the leading axis."""
     iteration: np.ndarray
     rhs: np.ndarray
     x_tilde: np.ndarray
@@ -80,7 +67,7 @@ class Trace(NamedTuple):
 
 
 class Result(NamedTuple):
-    """Final iterate plus per-QP diagnostics. converged=False means max_iter."""
+    """Solution and stopping diagnostics."""
     x: jax.Array
     z: jax.Array
     y: jax.Array
@@ -92,7 +79,7 @@ class Result(NamedTuple):
 
     @property
     def state(self):
-        """The warm-startable (x, z, y); pass as init= to a nearby next solve."""
+        """Return the warm-startable iterate."""
         return State(self.x, self.z, self.y)
 
 
@@ -101,8 +88,7 @@ def _inf(w):
 
 
 def step(cache, q, l, u, state):
-    """One scalar ADMM update.  Pure: new state out, nothing mutated, so jit
-    and vmap can trace it.  The compiled loop discards Parts (dead code)."""
+    """One pure scalar ADMM iteration."""
     x, z, y = state
     rhs = cache.sigma * x - q + cache.A.T @ (cache.rho * z - y)
     x_tilde = cho_solve((cache.factor, True), rhs)  # reuse the factor; True is the literal static lower flag
@@ -116,7 +102,7 @@ def step(cache, q, l, u, state):
 
 
 def report(cache, q, l, u, state, eps_abs, eps_rel):
-    """OSQP residuals and absolute-plus-relative infinity-norm stop test."""
+    """Compute OSQP residuals and stopping thresholds."""
     x, z, y = state
     Ax, Px, Aty = cache.A @ x, cache.P @ x, cache.A.T @ y
     r_primal = Ax - z
@@ -137,12 +123,7 @@ _jit_report = jax.jit(report)
 
 
 def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
-    """Batched fixed-shape iteration, entirely on device.
-
-    Convergence is only checked after a step: from the first iteration onward
-    z is a box projection, so z is in [l, u] by construction and the residuals
-    carry their optimality meaning.  A raw initial state has no such guarantee.
-    """
+    """Run a batched ADMM loop on device."""
     iters = jnp.zeros(q.shape[0], jnp.int64)
     done = jnp.zeros(q.shape[0], bool)
 
@@ -172,8 +153,7 @@ _jit_solve_loop = jax.jit(_solve_loop)
 
 
 def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
-    """Same jitted step and report, driven from Python; snapshots are appended
-    only after each compiled call has returned to the host."""
+    """Run the same jitted step from Python and record it."""
     converged, k, snaps = False, 0, []
     while not converged and k < max_iter:
         state, parts = _jit_step(cache, q, l, u, state)
@@ -192,12 +172,7 @@ def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
 
 
 class Solver:
-    """Host-side owner of one fixed QP family: P and A set once, factored once.
-
-    Construction converts and validates P and A, forms H, and calls Cholesky
-    exactly once.  Every solve, batch, trace, and warm start reuses the
-    resulting immutable Cache; no method mutates the solver or enters jit.
-    """
+    """A fixed QP family sharing one factorization."""
 
     def __init__(self, P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):
         P = jnp.asarray(P, jnp.float64)
@@ -216,20 +191,19 @@ class Solver:
 
     @property
     def cache(self):
-        """The immutable setup product that every method below reuses."""
+        """Return the shared setup data."""
         return self._cache
 
     @property
     def factorizations(self):
-        """Construction is the single setup event; this never increments."""
+        """Return the number of setup factorizations."""
         return self._factorizations
 
     def solve(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
               max_iter=4000):
-        """Solve one QP; init=State(x, z, y) warm-starts from a prior result."""
+        """Solve one QP, optionally from a warm start."""
         m, n = self._cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
-        assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)
         if init is None:
             init = State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
         # One QP is a one-lane batch of the same compiled loop: the lane axis
@@ -242,7 +216,7 @@ class Solver:
 
     def solve_batch(self, qs, ls, us, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
                     max_iter=4000):
-        """Solve B QPs sharing the cache; qs is (B, n) and ls, us are (B, m)."""
+        """Solve a batch sharing P, A, and the factor."""
         cache = self._cache
         m, n = cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (qs, ls, us))
@@ -259,8 +233,7 @@ class Solver:
 
     def trace(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
               max_iter=4000):
-        """Solve one QP from a host loop around the same jitted step, recording
-        every named intermediate.  Returns (Result, Trace) separately."""
+        """Solve one QP and retain every iteration."""
         cache = self._cache
         m, n = cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))

@@ -86,7 +86,7 @@ Cholesky factor.
 
 Two files matter:
 
-1. [`splitqp.py`](splitqp.py) (271 lines) is the solver: the `Solver` facade
+1. [`splitqp.py`](splitqp.py) (244 lines) is the solver: the `Solver` facade
    that owns the factored family, and the pure JAX core — scalar step,
    residual report, `vmap` batch, compiled loop with per-lane stopping, and
    trace loop.
