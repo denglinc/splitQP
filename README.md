@@ -16,12 +16,11 @@ Python 3.12 and [uv](https://docs.astral.sh/uv/) are required. From the
 repository root:
 
 ```bash
-JAX_PLATFORMS=cpu uv run --group notebook jupyter execute portfolio.ipynb
+JAX_PLATFORMS=cpu uv run --group notebook jupyter execute --inplace portfolio.ipynb
 ```
 
 This runs [`portfolio.ipynb`](portfolio.ipynb) top to bottom: it solves a
-64-member Markowitz family, regenerates both figures, runs the validation
-checks, and prints:
+64-member Markowitz family, runs the validation checks, and prints:
 
 ```text
 64 QPs, 1 factorization
@@ -90,8 +89,7 @@ Cholesky factor.
 2. [`portfolio.ipynb`](portfolio.ipynb) (18 cells) contains the portfolio
    example, the fresh-solve reference, the
    exact-fraction audit, the JAX transform and batch checks, the OSQP
-   comparison, and the source of both README figures and the warm-start
-   diagnostic.
+   comparison, and the warm-start diagnostic.
 
 ## Design
 
@@ -104,8 +102,8 @@ Programs*](https://arxiv.org/pdf/1711.08013).
 Execute the notebook on CPU and on the default JAX device:
 
 ```bash
-JAX_PLATFORMS=cpu uv run --group notebook jupyter execute portfolio.ipynb
-uv run --group notebook jupyter execute portfolio.ipynb
+JAX_PLATFORMS=cpu uv run --group notebook jupyter execute --inplace portfolio.ipynb
+uv run --group notebook jupyter execute --inplace portfolio.ipynb
 ```
 
 Its visible assertions compare an exact-fraction first step and 30 iterations
