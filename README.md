@@ -83,7 +83,7 @@ Cholesky factor.
 
 ## Project structure
 
-1. [`splitqp.py`](splitqp.py) (244 lines) contains the `Solver`, scalar ADMM
+1. [`splitqp.py`](splitqp.py) (227 lines) contains the `Solver`, scalar ADMM
    step, residual calculation, `vmap` batch, compiled loop with per-lane
    stopping, and trace loop.
 2. [`portfolio.ipynb`](portfolio.ipynb) (18 cells) contains the portfolio

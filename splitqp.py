@@ -11,8 +11,7 @@ import numpy as np
 from jax.scipy.linalg import cho_factor, cho_solve
 
 
-class Cache(NamedTuple):
-    """Fixed matrices and their shared Cholesky factor."""
+class Cache(NamedTuple):  # Fixed data shared by every vmap lane.
     P: jax.Array
     A: jax.Array
     factor: jax.Array  # lower-triangular Cholesky factor of H
@@ -21,15 +20,13 @@ class Cache(NamedTuple):
     alpha: jax.Array
 
 
-class State(NamedTuple):
-    """Warm-startable ADMM iterate."""
+class State(NamedTuple):  # Warm-startable (x, z, y) pytree.
     x: jax.Array
     z: jax.Array
     y: jax.Array
 
 
-class Parts(NamedTuple):
-    """Named intermediates from one ADMM step."""
+class Parts(NamedTuple):  # Named values from one scalar ADMM step.
     rhs: jax.Array
     x_tilde: jax.Array
     z_tilde: jax.Array
@@ -37,8 +34,7 @@ class Parts(NamedTuple):
     v: jax.Array  # pre-clip value; which side of [l, u] it lands on is the active set
 
 
-class Report(NamedTuple):
-    """Residuals and stopping data for one state."""
+class Report(NamedTuple):  # Residuals and stopping data for one state.
     r_primal: jax.Array
     r_dual: jax.Array
     eps_primal: jax.Array
@@ -47,8 +43,7 @@ class Report(NamedTuple):
     converged: jax.Array
 
 
-class Trace(NamedTuple):
-    """Iteration records stacked along the leading axis."""
+class Trace(NamedTuple):  # Step records stacked along the iteration axis.
     iteration: np.ndarray
     rhs: np.ndarray
     x_tilde: np.ndarray
@@ -66,8 +61,7 @@ class Trace(NamedTuple):
     converged: np.ndarray
 
 
-class Result(NamedTuple):
-    """Solution and stopping diagnostics."""
+class Result(NamedTuple):  # Final state and per-QP diagnostics.
     x: jax.Array
     z: jax.Array
     y: jax.Array
@@ -78,17 +72,15 @@ class Result(NamedTuple):
     r_dual: jax.Array    # infinity norm of Px + q + A'y
 
     @property
-    def state(self):
-        """Return the warm-startable iterate."""
+    def state(self):  # Repackage the result as a warm-start state.
         return State(self.x, self.z, self.y)
 
 
-def _inf(w):
+def _inf(w):  # Batched infinity norm over the final axis.
     return jnp.max(jnp.abs(w), axis=-1)
 
 
-def step(cache, q, l, u, state):
-    """One pure scalar ADMM iteration."""
+def step(cache, q, l, u, state):  # Pure scalar update transformed by jit and vmap.
     x, z, y = state
     rhs = cache.sigma * x - q + cache.A.T @ (cache.rho * z - y)
     x_tilde = cho_solve((cache.factor, True), rhs)  # reuse the factor; True is the literal static lower flag
@@ -101,8 +93,7 @@ def step(cache, q, l, u, state):
     return State(x_new, z_new, y_new), Parts(rhs, x_tilde, z_tilde, z_bar, v)
 
 
-def report(cache, q, l, u, state, eps_abs, eps_rel):
-    """Compute OSQP residuals and stopping thresholds."""
+def report(cache, q, l, u, state, eps_abs, eps_rel):  # Residuals and stop test.
     x, z, y = state
     Ax, Px, Aty = cache.A @ x, cache.P @ x, cache.A.T @ y
     r_primal = Ax - z
@@ -122,8 +113,7 @@ _jit_step = jax.jit(step)
 _jit_report = jax.jit(report)
 
 
-def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
-    """Run a batched ADMM loop on device."""
+def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):  # Fixed-shape device loop.
     iters = jnp.zeros(q.shape[0], jnp.int64)
     done = jnp.zeros(q.shape[0], bool)
 
@@ -152,8 +142,7 @@ def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
 _jit_solve_loop = jax.jit(_solve_loop)
 
 
-def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
-    """Run the same jitted step from Python and record it."""
+def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):  # Host loop around the jitted step.
     converged, k, snaps = False, 0, []
     while not converged and k < max_iter:
         state, parts = _jit_step(cache, q, l, u, state)
@@ -171,10 +160,9 @@ def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
     return result, trace
 
 
-class Solver:
-    """A fixed QP family sharing one factorization."""
+class Solver:  # Host API owning one factorized QP family.
 
-    def __init__(self, P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):
+    def __init__(self, P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):  # Factor P, A once.
         P = jnp.asarray(P, jnp.float64)
         A = jnp.asarray(A, jnp.float64)
         n = P.shape[0]
@@ -190,18 +178,15 @@ class Solver:
         self._factorizations = 1  # the cho_factor call above is the only one in the module
 
     @property
-    def cache(self):
-        """Return the shared setup data."""
+    def cache(self):  # Expose the immutable shared setup data.
         return self._cache
 
     @property
-    def factorizations(self):
-        """Return the number of setup factorizations."""
+    def factorizations(self):  # Always one after successful construction.
         return self._factorizations
 
     def solve(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
-              max_iter=4000):
-        """Solve one QP, optionally from a warm start."""
+              max_iter=4000):  # Wrap one QP as one batch lane.
         m, n = self._cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
         if init is None:
@@ -215,8 +200,7 @@ class Solver:
                       r.objective[0], r.r_primal[0], r.r_dual[0])
 
     def solve_batch(self, qs, ls, us, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
-                    max_iter=4000):
-        """Solve a batch sharing P, A, and the factor."""
+                    max_iter=4000):  # Map the scalar step over a QP family.
         cache = self._cache
         m, n = cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (qs, ls, us))
@@ -232,8 +216,7 @@ class Solver:
                       _inf(rep.r_primal), _inf(rep.r_dual))
 
     def trace(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
-              max_iter=4000):
-        """Solve one QP and retain every iteration."""
+              max_iter=4000):  # Record the same jitted scalar step on host.
         cache = self._cache
         m, n = cache.A.shape
         q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
