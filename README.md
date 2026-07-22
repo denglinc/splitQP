@@ -1,9 +1,9 @@
 # splitQP
 
-A tiny JAX solver for families of dense convex quadratic programs. It keeps the
-quadratic and constraint matrices fixed while the linear term and bounds vary,
-so one Cholesky factorization serves every ADMM iteration and every QP in the
-batch.
+A tiny JAX solver for families of dense convex quadratic programs with fixed
+quadratic and constraint matrices. It implements proximal ADMM: one Cholesky
+factorization serves every iteration and every QP while the linear term and
+bounds vary.
 
 The core solver is 238 lines and includes `vmap` batching, warm starts,
 per-problem stopping, and a readable iteration trace. A 61-line direct
@@ -126,7 +126,3 @@ residuals are also compared with OSQP.
 - [JAX documentation](https://docs.jax.dev/) and
   [JAXopt's BoxOSQP](https://github.com/google/jaxopt) for transform and
   factor/solve patterns in JAX.
-
-## License
-
-No license file is currently included.
