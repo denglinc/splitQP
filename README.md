@@ -34,14 +34,12 @@ system, install the optional CUDA backend with `uv sync --extra cuda`.
 
 splitQP accepts the box-constrained form
 
-$$
+```math
 \begin{aligned}
-\underset{x}{\operatorname{minimize}} \quad
-    & \frac{1}{2}x^\top P x + q^\top x \\
-\operatorname{subject\ to} \quad
-    & l \leq A x \leq u,
+\min_x \quad & \frac{1}{2}x^\top P x + q^\top x \\
+\text{subject to} \quad & l \leq A x \leq u.
 \end{aligned}
-$$
+```
 
 where $P \succeq 0$. A problem family keeps $P$ and $A$ fixed while $q$, $l$,
 and $u$ vary. Equalities, one-sided constraints, and two-sided constraints all
@@ -73,25 +71,26 @@ Read the files in this order:
 
 ## Design
 
-For fixed $\rho>0$, $\sigma>0$, and $\alpha\in(0,2)$, setup forms
+For positive fixed scalars $\rho$ and $\sigma$, and $\alpha\in(0,2)$, setup
+forms
 
-$$
+```math
 H = P + \sigma I + \rho A^\top A
-$$
+```
 
 and factorizes $H$ once. Each iteration then evaluates
 
-$$
+```math
 \begin{aligned}
 H\tilde{x}^{k+1}
     &= \sigma x^k-q+A^\top(\rho z^k-y^k), \\
 \tilde{z}^{k+1} &= A\tilde{x}^{k+1}, \\
 x^{k+1} &= \alpha\tilde{x}^{k+1}+(1-\alpha)x^k, \\
 \bar{z}^{k+1} &= \alpha\tilde{z}^{k+1}+(1-\alpha)z^k, \\
-z^{k+1} &= \Pi_{[l,u]}\!\left(\bar{z}^{k+1}+y^k/\rho\right), \\
+z^{k+1} &= \Pi_{[l,u]}\left(\bar{z}^{k+1}+y^k/\rho\right), \\
 y^{k+1} &= y^k+\rho\left(\bar{z}^{k+1}-z^{k+1}\right).
 \end{aligned}
-$$
+```
 
 The first equation is solved with the cached Cholesky factor; the implementation
 never forms $H^{-1}$. Fixed $\rho$ is deliberate: changing it would change $H$
@@ -99,15 +98,15 @@ and require a new factorization.
 
 Termination is based on the original-coordinate KKT residuals
 
-$$
+```math
 r_{\mathrm{pri}} = Ax-z,
 \qquad
 r_{\mathrm{dual}} = Px+q+A^\top y,
-$$
+```
 
 with absolute-plus-relative infinity-norm thresholds
 
-$$
+```math
 \begin{aligned}
 \epsilon_{\mathrm{pri}}
     &= \epsilon_{\mathrm{abs}}
@@ -120,7 +119,7 @@ $$
                      \lVert A^\top y\rVert_\infty,
                      \lVert q\rVert_\infty\right).
 \end{aligned}
-$$
+```
 
 The projection also enforces the normal-cone condition
 $z=\Pi_{[l,u]}(z+y/\rho)$ at every accepted iterate.
