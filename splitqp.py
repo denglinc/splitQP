@@ -3,11 +3,12 @@
     minimize    1/2 x'Px + q'x
     subject to  l <= Ax <= u
 
-setup() factors H = P + sigma*I + rho*A'A once.  After that, every ADMM
-iteration is one triangular solve, a box projection, and a dual update -- for
-one QP or a whole batch that shares P and A and varies only q, l, u.
-reference.py runs the same six equations with a fresh dense solve each step;
-test.py holds the two paths together.
+Solver(P, A) factors H = P + sigma*I + rho*A'A exactly once, at construction.
+After that, every ADMM iteration is one triangular solve, a box projection,
+and a dual update -- for one QP or a whole batch that shares P and A and
+varies only q, l, u.  The mathematical core is the module-level pure
+functions below; Solver is a thin host-side facade that owns the factored
+family and never enters jit.
 """
 
 from typing import NamedTuple
@@ -19,8 +20,6 @@ jax.config.update("jax_enable_x64", True)  # float64 for every array; set before
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import cho_factor, cho_solve
-
-factorizations = 0  # host-side bookkeeping; cho_factor is called only inside setup()
 
 
 class Cache(NamedTuple):
@@ -62,7 +61,7 @@ class Report(NamedTuple):
 
 
 class Trace(NamedTuple):
-    """Per-iteration snapshots (leading axis = iteration) from solve(trace=True)."""
+    """Per-iteration snapshots (leading axis = iteration) from Solver.trace."""
     iteration: np.ndarray
     rhs: np.ndarray
     x_tilde: np.ndarray
@@ -90,28 +89,15 @@ class Result(NamedTuple):
     objective: jax.Array
     r_primal: jax.Array  # infinity norm of Ax - z
     r_dual: jax.Array    # infinity norm of Px + q + A'y
-    trace: Trace | None
+
+    @property
+    def state(self):
+        """The warm-startable (x, z, y); pass as init= to a nearby next solve."""
+        return State(self.x, self.z, self.y)
 
 
 def _inf(w):
     return jnp.max(jnp.abs(w), axis=-1)
-
-
-def setup(P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):
-    """Assemble H = P + sigma*I + rho*A'A and factor it exactly once."""
-    global factorizations
-    P = jnp.asarray(P, jnp.float64)
-    A = jnp.asarray(A, jnp.float64)
-    n = P.shape[0]
-    assert P.shape == (n, n) and A.ndim == 2 and A.shape[1] == n
-    assert bool(jnp.allclose(P, P.T)), "P must be symmetric"
-    assert rho > 0 and sigma > 0 and 0 < alpha < 2
-    H = P + sigma * jnp.eye(n) + rho * A.T @ A
-    # cho_factor returns (array, lower_flag); keep only the array.  Carrying the
-    # Python bool through jit/vmap would turn a static flag into a tracer.
-    factor, _ = cho_factor(H, lower=True)
-    factorizations += 1
-    return Cache(P, A, factor, jnp.float64(rho), jnp.float64(sigma), jnp.float64(alpha))
 
 
 def step(cache, q, l, u, state):
@@ -185,40 +171,6 @@ def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
 _jit_solve_loop = jax.jit(_solve_loop)
 
 
-def solve_batch(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_iter=4000):
-    """Solve B QPs that share cache; q is (B, n) and l, u are (B, m)."""
-    m, n = cache.A.shape
-    q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
-    B = q.shape[0]
-    assert q.shape == (B, n) and l.shape == (B, m) and u.shape == (B, m)
-    assert bool(jnp.all(l <= u)) and max_iter >= 1
-    if init is None:
-        init = State(jnp.zeros((B, n)), jnp.zeros((B, m)), jnp.zeros((B, m)))
-    state, iters, done = _jit_solve_loop(cache, q, l, u, init, eps_abs, eps_rel, max_iter)
-    rep = _batch_report(cache, q, l, u, state, eps_abs, eps_rel)
-    return Result(state.x, state.z, state.y, iters, done, rep.objective,
-                  _inf(rep.r_primal), _inf(rep.r_dual), None)
-
-
-def solve(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_iter=4000,
-          trace=False):
-    """Solve one QP.  trace=True runs the same jitted step from a host loop and
-    records every named intermediate for trajectory inspection."""
-    m, n = cache.A.shape
-    q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
-    assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)
-    assert bool(jnp.all(l <= u)) and max_iter >= 1
-    if init is None:
-        init = State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
-    if trace:
-        return _trace_solve(cache, q, l, u, init, eps_abs, eps_rel, max_iter)
-    batch_init = State(init.x[None], init.z[None], init.y[None])
-    r = solve_batch(cache, q[None], l[None], u[None], init=batch_init,
-                    eps_abs=eps_abs, eps_rel=eps_rel, max_iter=max_iter)
-    return Result(r.x[0], r.z[0], r.y[0], r.iterations[0], r.converged[0],
-                  r.objective[0], r.r_primal[0], r.r_dual[0], None)
-
-
 def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
     """Same jitted step and report, driven from Python; snapshots are appended
     only after each compiled call has returned to the host."""
@@ -234,5 +186,86 @@ def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
                            rep.converged))
     trace = Trace(*(np.stack([np.asarray(getattr(s, f)) for s in snaps])
                     for f in Trace._fields))
-    return Result(state.x, state.z, state.y, jnp.int64(k), rep.converged,
-                  rep.objective, _inf(rep.r_primal), _inf(rep.r_dual), trace)
+    result = Result(state.x, state.z, state.y, jnp.int64(k), rep.converged,
+                    rep.objective, _inf(rep.r_primal), _inf(rep.r_dual))
+    return result, trace
+
+
+class Solver:
+    """Host-side owner of one fixed QP family: P and A set once, factored once.
+
+    Construction converts and validates P and A, forms H, and calls Cholesky
+    exactly once.  Every solve, batch, trace, and warm start reuses the
+    resulting immutable Cache; no method mutates the solver or enters jit.
+    """
+
+    def __init__(self, P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):
+        P = jnp.asarray(P, jnp.float64)
+        A = jnp.asarray(A, jnp.float64)
+        n = P.shape[0]
+        assert P.shape == (n, n) and A.ndim == 2 and A.shape[1] == n
+        assert bool(jnp.allclose(P, P.T)), "P must be symmetric"
+        assert rho > 0 and sigma > 0 and 0 < alpha < 2
+        H = P + sigma * jnp.eye(n) + rho * A.T @ A
+        # cho_factor returns (array, lower_flag); keep only the array.  Carrying
+        # the Python bool through jit/vmap would turn a static flag into a tracer.
+        factor, _ = cho_factor(H, lower=True)
+        self._cache = Cache(P, A, factor, jnp.float64(rho), jnp.float64(sigma),
+                            jnp.float64(alpha))
+        self._factorizations = 1  # the cho_factor call above is the only one in the module
+
+    @property
+    def cache(self):
+        """The immutable setup product that every method below reuses."""
+        return self._cache
+
+    @property
+    def factorizations(self):
+        """Construction is the single setup event; this never increments."""
+        return self._factorizations
+
+    def solve(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
+              max_iter=4000):
+        """Solve one QP; init=State(x, z, y) warm-starts from a prior result."""
+        m, n = self._cache.A.shape
+        q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
+        assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)
+        if init is None:
+            init = State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
+        # One QP is a one-lane batch of the same compiled loop: the lane axis
+        # is added here and stripped from the returned leaves below.
+        r = self.solve_batch(q[None], l[None], u[None],
+                             init=State(init.x[None], init.z[None], init.y[None]),
+                             eps_abs=eps_abs, eps_rel=eps_rel, max_iter=max_iter)
+        return Result(r.x[0], r.z[0], r.y[0], r.iterations[0], r.converged[0],
+                      r.objective[0], r.r_primal[0], r.r_dual[0])
+
+    def solve_batch(self, qs, ls, us, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
+                    max_iter=4000):
+        """Solve B QPs sharing the cache; qs is (B, n) and ls, us are (B, m)."""
+        cache = self._cache
+        m, n = cache.A.shape
+        q, l, u = (jnp.asarray(w, jnp.float64) for w in (qs, ls, us))
+        B = q.shape[0]
+        assert q.shape == (B, n) and l.shape == (B, m) and u.shape == (B, m)
+        assert bool(jnp.all(l <= u)) and max_iter >= 1
+        if init is None:
+            init = State(jnp.zeros((B, n)), jnp.zeros((B, m)), jnp.zeros((B, m)))
+        state, iters, done = _jit_solve_loop(cache, q, l, u, init, eps_abs,
+                                             eps_rel, max_iter)
+        rep = _batch_report(cache, q, l, u, state, eps_abs, eps_rel)
+        return Result(state.x, state.z, state.y, iters, done, rep.objective,
+                      _inf(rep.r_primal), _inf(rep.r_dual))
+
+    def trace(self, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6,
+              max_iter=4000):
+        """Solve one QP from a host loop around the same jitted step, recording
+        every named intermediate.  Returns (Result, Trace) separately."""
+        cache = self._cache
+        m, n = cache.A.shape
+        q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
+        assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)
+        assert bool(jnp.all(l <= u)) and max_iter >= 1
+        if init is None:
+            init = State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
+        return _trace_solve(cache, q, l, u, init, eps_abs, eps_rel, max_iter)

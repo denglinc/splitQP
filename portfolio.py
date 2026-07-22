@@ -3,9 +3,9 @@
     uv run python portfolio.py --points 64
 
 A fixed covariance matrix and constraint matrix define a family of Markowitz
-QPs in which only the target-return bound changes.  setup() factors H once;
-solve_batch, 64 cold scalar solves, and a warm-started sweep all reuse that
-factor.  Every printed claim is asserted before it is printed.
+QPs in which only the target-return bound changes.  Constructing one Solver
+factors H once; a batch solve, 64 cold scalar solves, and a warm-started sweep
+all reuse that factor.  Every printed claim is asserted before it is printed.
 """
 
 import argparse
@@ -41,21 +41,20 @@ u = np.tile(np.concatenate([[1.0, np.inf], np.full(n, w_max)]), (B, 1))
 l[:, 1] = targets  # the only entry that varies across the family
 
 # ------------------------------------------------- solve everything, one factor
-splitqp.factorizations = 0
-cache = splitqp.setup(Sigma, A)  # the single Cholesky factorization
+solver = splitqp.Solver(Sigma, A)  # the single Cholesky factorization
 MAX_IT = 20000
 
-batch = splitqp.solve_batch(cache, q, l, u, max_iter=MAX_IT)
+batch = solver.solve_batch(q, l, u, max_iter=MAX_IT)
 jax.block_until_ready(batch)  # finish async device work before host reads
 
-cold = [splitqp.solve(cache, q[i], l[i], u[i], max_iter=MAX_IT) for i in range(B)]
+cold = [solver.solve(q[i], l[i], u[i], max_iter=MAX_IT) for i in range(B)]
 
 warm = []
 state = None
 for i in range(B):  # ascending targets, each started from the previous solution
-    r = splitqp.solve(cache, q[i], l[i], u[i], init=state, max_iter=MAX_IT)
+    r = solver.solve(q[i], l[i], u[i], init=state, max_iter=MAX_IT)
     warm.append(r)
-    state = splitqp.State(r.x, r.z, r.y)
+    state = r.state
 
 # ------------------------------------------- assert every claim, then print it
 x = np.asarray(batch.x)  # one explicit host conversion for all demo checks
@@ -65,7 +64,7 @@ iters_warm = np.array([int(r.iterations) for r in warm])
 
 assert bool(np.all(np.asarray(batch.converged)))
 assert all(bool(r.converged) for r in cold + warm)
-assert splitqp.factorizations == 1, "every solve above must reuse one factor"
+assert solver.factorizations == 1, "every solve above must reuse one factor"
 
 max_kkt = max(float(np.max(np.asarray(batch.r_primal))),
               float(np.max(np.asarray(batch.r_dual))))
@@ -81,7 +80,7 @@ returns = x @ mu
 risks = np.sqrt(np.einsum("bi,ij,bj->b", x, Sigma, x))
 assert np.all(returns >= targets - 1e-5) and np.all(np.diff(risks) > -1e-9)
 
-print(f"{B} QPs, {splitqp.factorizations} factorization")
+print(f"{B} QPs, {solver.factorizations} factorization")
 print(f"max KKT residual: {max_kkt:.2e}")
 print(f"batch/scalar difference: {batch_vs_scalar:.2e}")
 print(f"cold iterations vs warm sequence: {iters_cold.sum()} vs {iters_warm.sum()}")

@@ -56,7 +56,7 @@ ub = jnp.asarray(cb + rng.uniform(0.1, 1.0, size=(B, m)))
 #   x_tilde = H^-1 rhs = (28/41, 38/41),   z_tilde = A x_tilde = (66/41, 28/41),
 #   x = 3/2 x_tilde = (42/41, 57/41),      z_bar = 3/2 z_tilde = (99/41, 42/41),
 #   v = z_bar,  z = clip(v, l, u) = (1, 3/4),  y = 2 (z_bar - z) = (116/41, 45/82).
-cache2 = splitqp.setup(P2, A2, rho=2.0, sigma=1.0, alpha=1.5)
+cache2 = splitqp.Solver(P2, A2, rho=2.0, sigma=1.0, alpha=1.5).cache
 state1, parts1 = splitqp.step(cache2, q2, l2, u2,
                               splitqp.State(jnp.zeros(2), jnp.zeros(2), jnp.zeros(2)))
 audited = [
@@ -75,7 +75,8 @@ for (got, exact), name in zip(audited[:3], ("rhs", "x_tilde", "z_tilde")):
                     rtol=1e-13, atol=1e-14)
 
 # Every named intermediate of the cached path equals the fresh-solve reference.
-cache = splitqp.setup(P, A)
+solver = splitqp.Solver(P, A)
+cache = solver.cache
 _, _, _, ref = solve_reference(P, A, q, l, u, max_iter=30)
 state = splitqp.State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
 for k in range(30):
@@ -100,15 +101,15 @@ for a, b in zip(eager_out[0] + eager_out[1], jit_out[0] + jit_out[1]):
     assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12, atol=1e-14)
 
 # Compiled while_loop, host trace loop, and reference all accept the same stop.
-res_loop = splitqp.solve(cache, q, l, u)
-res_trace = splitqp.solve(cache, q, l, u, trace=True)
+res_loop = solver.solve(q, l, u)
+res_trace, trace = solver.trace(q, l, u)
 _, _, _, ref_full = solve_reference(P, A, q, l, u)
 assert bool(res_loop.converged) and bool(res_trace.converged)
 assert int(res_loop.iterations) == int(res_trace.iterations) == len(ref_full)
 assert_allclose(np.asarray(res_loop.x), np.asarray(res_trace.x), rtol=1e-10, atol=1e-12)
 assert_allclose(np.asarray(res_trace.x), np.asarray(ref_full[-1]["x"]), rtol=1e-8,
                 atol=1e-10)
-assert res_trace.trace.x.shape[0] == int(res_trace.iterations)
+assert trace.x.shape[0] == int(res_trace.iterations)
 print(f"trajectory okay ({int(res_loop.iterations)} iterations, "
       "30 audited against reference)")
 
@@ -126,15 +127,15 @@ for i in range(B):
         assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-10, atol=1e-12)
 
 # One batched solve equals B independently stopped scalar solves, lane by lane.
-splitqp.factorizations = 0
-cache = splitqp.setup(P, A)
-res_b = splitqp.solve_batch(cache, qb, lb, ub, max_iter=30000)
+solver = splitqp.Solver(P, A)
+cache = solver.cache
+res_b = solver.solve_batch(qb, lb, ub, max_iter=30000)
 assert bool(jnp.all(res_b.converged))
 for i in range(B):
-    r_i = splitqp.solve(cache, qb[i], lb[i], ub[i], max_iter=30000)
+    r_i = solver.solve(qb[i], lb[i], ub[i], max_iter=30000)
     assert int(res_b.iterations[i]) == int(r_i.iterations)
     assert_allclose(np.asarray(res_b.x[i]), np.asarray(r_i.x), rtol=1e-9, atol=1e-11)
-assert splitqp.factorizations == 1, "many solves must reuse the one factorization"
+assert solver.factorizations == 1, "many solves must reuse the one factorization"
 
 # Projection invariant: z = clip(z + y/rho, l, u) holds at every solution, so
 # the normal-cone condition costs nothing to enforce.
@@ -143,8 +144,8 @@ assert_allclose(np.asarray(res_b.z), np.asarray(z_proj), rtol=0, atol=1e-9)
 
 # Warm start touches only (x, z, y): a solution is a fixed point of the step,
 # so restarting from it is accepted after a single confirming iteration.
-warm = splitqp.solve(cache, qb[0], lb[0], ub[0],
-                     init=splitqp.State(res_b.x[0], res_b.z[0], res_b.y[0]))
+warm = solver.solve(qb[0], lb[0], ub[0],
+                    init=splitqp.State(res_b.x[0], res_b.z[0], res_b.y[0]))
 assert int(warm.iterations) == 1 and bool(warm.converged)
 print(f"batch okay ({B} QPs, iterations {[int(i) for i in res_b.iterations]}, "
       "1 factorization)")
@@ -154,7 +155,7 @@ import scipy.sparse as sparse  # dev-only oracle dependencies
 import osqp
 
 for Pi, Ai, qi, li, ui, ours in [
-    (P2, A2, q2, l2, u2, splitqp.solve(splitqp.setup(P2, A2), q2, l2, u2)),
+    (P2, A2, q2, l2, u2, splitqp.Solver(P2, A2).solve(q2, l2, u2)),
     (P, A, q, l, u, res_loop),
 ]:
     ref_solver = osqp.OSQP()
