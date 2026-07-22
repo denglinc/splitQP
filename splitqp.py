@@ -151,9 +151,14 @@ _jit_report = jax.jit(report)
 
 
 def _solve_loop(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
-    """Batched fixed-shape iteration, entirely on device."""
-    done = _batch_report(cache, q, l, u, state, eps_abs, eps_rel).converged
-    iters = jnp.zeros(done.shape, jnp.int64)
+    """Batched fixed-shape iteration, entirely on device.
+
+    Convergence is only checked after a step: from the first iteration onward
+    z is a box projection, so z is in [l, u] by construction and the residuals
+    carry their optimality meaning.  A raw initial state has no such guarantee.
+    """
+    iters = jnp.zeros(q.shape[0], jnp.int64)
+    done = jnp.zeros(q.shape[0], bool)
 
     def cond(carry):
         _, _, done, k = carry
@@ -186,7 +191,7 @@ def solve_batch(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_it
     q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
     B = q.shape[0]
     assert q.shape == (B, n) and l.shape == (B, m) and u.shape == (B, m)
-    assert bool(jnp.all(l <= u))
+    assert bool(jnp.all(l <= u)) and max_iter >= 1
     if init is None:
         init = State(jnp.zeros((B, n)), jnp.zeros((B, m)), jnp.zeros((B, m)))
     state, iters, done = _jit_solve_loop(cache, q, l, u, init, eps_abs, eps_rel, max_iter)
@@ -202,7 +207,7 @@ def solve(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_iter=400
     m, n = cache.A.shape
     q, l, u = (jnp.asarray(w, jnp.float64) for w in (q, l, u))
     assert q.shape == (n,) and l.shape == (m,) and u.shape == (m,)
-    assert bool(jnp.all(l <= u))
+    assert bool(jnp.all(l <= u)) and max_iter >= 1
     if init is None:
         init = State(jnp.zeros(n), jnp.zeros(m), jnp.zeros(m))
     if trace:
@@ -217,19 +222,17 @@ def solve(cache, q, l, u, *, init=None, eps_abs=1e-6, eps_rel=1e-6, max_iter=400
 def _trace_solve(cache, q, l, u, state, eps_abs, eps_rel, max_iter):
     """Same jitted step and report, driven from Python; snapshots are appended
     only after each compiled call has returned to the host."""
-    rep = _jit_report(cache, q, l, u, state, eps_abs, eps_rel)
-    converged = bool(rep.converged)  # device-to-host sync: read one traced bool
-    k, snaps = 0, []
+    converged, k, snaps = False, 0, []
     while not converged and k < max_iter:
         state, parts = _jit_step(cache, q, l, u, state)
         rep = _jit_report(cache, q, l, u, state, eps_abs, eps_rel)
         k += 1
-        converged = bool(rep.converged)
+        converged = bool(rep.converged)  # device-to-host sync: wait for and read one traced bool
         snaps.append(Trace(k, parts.rhs, parts.x_tilde, parts.z_tilde, state.x,
                            parts.z_bar, parts.v, state.z, state.y, rep.objective,
                            rep.r_primal, rep.r_dual, rep.eps_primal, rep.eps_dual,
                            rep.converged))
     trace = Trace(*(np.stack([np.asarray(getattr(s, f)) for s in snaps])
-                    for f in Trace._fields)) if snaps else None
+                    for f in Trace._fields))
     return Result(state.x, state.z, state.y, jnp.int64(k), rep.converged,
                   rep.objective, _inf(rep.r_primal), _inf(rep.r_dual), trace)

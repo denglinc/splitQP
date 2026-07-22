@@ -141,10 +141,11 @@ assert splitqp.factorizations == 1, "many solves must reuse the one factorizatio
 z_proj = jnp.clip(res_b.z + res_b.y / cache.rho, lb, ub)
 assert_allclose(np.asarray(res_b.z), np.asarray(z_proj), rtol=0, atol=1e-9)
 
-# Warm start touches only (x, z, y): restarting from a solution accepts at once.
+# Warm start touches only (x, z, y): a solution is a fixed point of the step,
+# so restarting from it is accepted after a single confirming iteration.
 warm = splitqp.solve(cache, qb[0], lb[0], ub[0],
                      init=splitqp.State(res_b.x[0], res_b.z[0], res_b.y[0]))
-assert int(warm.iterations) == 0 and bool(warm.converged)
+assert int(warm.iterations) == 1 and bool(warm.converged)
 print(f"batch okay ({B} QPs, iterations {[int(i) for i in res_b.iterations]}, "
       "1 factorization)")
 
