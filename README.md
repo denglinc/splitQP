@@ -56,8 +56,18 @@ solver.factorizations # 1 after construction
 
 [`split.ipynb`](split.ipynb) builds a small ordered family from one factorization
 and solves it with `solve`, `solve_batch`, and `solve_sequence`, showing that batch
-treats members independently while the sequence follows an ordered warm start. A
-small optional local timing script is included in `bench.py`.
+treats members independently while the sequence follows an ordered warm start:
+
+```bash
+uv run --group demo jupyter lab split.ipynb
+```
+
+A small optional local timing script is included in `bench.py`:
+
+```bash
+uv run --group bench python bench.py          # portfolio + one synthetic family
+uv run --group bench python bench.py --full   # more families
+```
 
 ## Limitations
 

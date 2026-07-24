@@ -24,7 +24,6 @@ packages = ["src/splitqp"]
 # Optional: run the root notebook (split.ipynb).
 demo = [
     "jupyter>=1,<2",
-    "matplotlib>=3,<4",
 ]
 # Optional: comparison solvers for the local timing script (bench.py).
 bench = [
