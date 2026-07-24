@@ -2,3 +2,6 @@
 __pycache__/
 .jax_cache/
 *.pyc
+dist/
+*.egg-info/
+.mypy_cache/
