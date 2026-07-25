@@ -87,8 +87,16 @@ The implementation is feature-complete for its intended scope.
 
 ## References
 
-- [Stellato et al., *OSQP*](https://arxiv.org/abs/1711.08013)
-- [Boyd et al., *ADMM*](https://web.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf)
-- [JAX documentation](https://docs.jax.dev/)
+- [Boyd et al., *Distributed Optimization and Statistical Learning via the
+  Alternating Direction Method of Multipliers*](https://web.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf)
+  for the ADMM state, residual interpretation, stopping tests, and warm starts.
+- [Stellato et al., *OSQP: an Operator Splitting Solver for Quadratic
+  Programs*](https://arxiv.org/abs/1711.08013) for the box form, proximal term,
+  relaxation, factor reuse, and final-point comparison.
+- [Bishop et al., *ReLU-QP*](https://arxiv.org/abs/2311.18056) for the
+  fixed-point and batched interpretation of this iteration.
+- [JAX documentation](https://docs.jax.dev/) and
+  [JAXopt's BoxOSQP](https://github.com/google/jaxopt) for transform and
+  factor/solve patterns in JAX.
 - [qpbenchmark](https://github.com/qpsolvers/qpbenchmark), a broader benchmark
   framework for quadratic-programming solvers.
