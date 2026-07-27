@@ -21,9 +21,10 @@ build-backend = "hatchling.build"
 packages = ["src/splitqp"]
 
 [dependency-groups]
-# Optional: run the root notebook (split.ipynb).
+# Optional: run the root notebook (Preconditioning.ipynb).
 demo = [
     "jupyter>=1,<2",
+    "matplotlib>=3.8,<4",
 ]
 # Optional: comparison solvers for the local timing script (bench.py).
 bench = [

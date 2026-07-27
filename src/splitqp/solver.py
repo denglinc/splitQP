@@ -15,7 +15,7 @@ class Cache(NamedTuple):  # Fixed data shared by every vmap lane.
     P: jax.Array
     A: jax.Array
     factor: jax.Array  # lower-triangular Cholesky factor of H
-    rho: jax.Array
+    rho: jax.Array     # (m,) penalty diagonal; a scalar rho is stored as rho * 1
     sigma: jax.Array
     alpha: jax.Array
 
@@ -59,6 +59,9 @@ def _inf(w):  # Batched infinity norm over the final axis.
 
 
 def step(cache, q, l, u, state):  # Pure scalar update transformed by jit and vmap.
+    # rho is one (m,) vector, so every rho product below is elementwise and the
+    # projection stays the coordinate-wise clip.  A full SPD penalty would couple
+    # the coordinates and is deliberately out of scope.
     x, z, y = state
     rhs = cache.sigma * x - q + cache.A.T @ (cache.rho * z - y)
     x_tilde = cho_solve((cache.factor, True), rhs)  # reuse the factor; True is the literal static lower flag
@@ -179,7 +182,11 @@ def _validate_family(P, A, rho, sigma, alpha):  # Fixed-data check at constructi
     scale = 1.0 + float(jnp.max(jnp.abs(P)))
     if float(jnp.min(jnp.linalg.eigvalsh(P))) < -1e-8 * scale:
         return "P must be positive semidefinite"
-    if not (rho > 0 and sigma > 0 and 0 < alpha < 2):
+    # rho is a scalar or one entry per constraint row; the shape is checked before
+    # the values so a mis-shaped penalty is named as such rather than as rho<=0.
+    if rho.ndim > 1 or (rho.ndim == 1 and rho.shape != (A.shape[0],)):
+        return "rho must be a scalar or a vector of shape (m,)"
+    if not (bool(jnp.all(rho > 0)) and sigma > 0 and 0 < alpha < 2):
         return "require rho>0, sigma>0, 0<alpha<2"
     return None
 
@@ -217,8 +224,10 @@ def _statuses(x, z, y, r_primal, r_dual, converged):  # Host per-lane status lab
 class Solver:  # Host API owning one factorized QP family.
 
     def __init__(self, P, A, *, rho=0.1, sigma=1e-6, alpha=1.6):  # Factor P, A once.
+        # rho is a positive scalar or a positive (m,) diagonal penalty.
         P = jnp.asarray(P, jnp.float64)
         A = jnp.asarray(A, jnp.float64)
+        rho = jnp.asarray(rho, jnp.float64)
         # Column count and constraint count, recorded even when data is invalid
         # so an explicit failure result still has the right shapes.
         self.n = int(P.shape[0]) if P.ndim == 2 else 0
@@ -228,17 +237,20 @@ class Solver:  # Host API owning one factorized QP family.
         factor = None
         if self._invalid_reason is None:
             n = P.shape[0]
-            H = P + sigma * jnp.eye(n) + rho * A.T @ A
+            # One (m,) penalty from here on: a scalar becomes rho * 1, so the jitted
+            # iteration never branches on scalar versus diagonal.
+            rho = jnp.broadcast_to(rho, (self.m,))
+            H = P + sigma * jnp.eye(n) + A.T @ (rho[:, None] * A)
             # cho_factor returns (array, lower_flag); keep only the array. Carrying
             # the Python bool through jit/vmap would turn a static flag into a tracer.
             factor, _ = cho_factor(H, lower=True)
             if not bool(jnp.all(jnp.isfinite(factor))):
-                self._invalid_reason = "H = P + sigma I + rho A^T A is not positive definite"
+                self._invalid_reason = "H = P + sigma I + A^T diag(rho) A is not positive definite"
         if self._invalid_reason is not None:
             self._cache = None
             self._factorizations = 0
             return
-        self._cache = Cache(P, A, factor, jnp.float64(rho), jnp.float64(sigma),
+        self._cache = Cache(P, A, factor, rho, jnp.float64(sigma),
                             jnp.float64(alpha))
         self._factorizations = 1  # the cho_factor call above is the only one in the module
 
