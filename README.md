@@ -1,4 +1,4 @@
-## splitQP
+# splitQP
 
 A tiny JAX solver for families of dense convex quadratic programs that share a
 fixed quadratic and constraint matrix. It implements proximal ADMM and is built
@@ -7,7 +7,7 @@ around two ideas: the metric that iteration runs in, and factorization reuse —
 iteration and every member of the family. This is a compact educational research
 implementation, not a production solver.
 
-### Problem & Method
+## Problem & Method
 
 ```math
 \min_x \ \tfrac{1}{2}x^\top P x + q^\top x \quad\text{s.t.}\quad l \leq A x \leq u,
@@ -17,14 +17,14 @@ with $P \succeq 0$. A family keeps $P$ and $A$ fixed while $q$, $l$, $u$ vary.
 Equalities ($l = u$), one-sided, two-sided, infinite, and empty constraint blocks
 all use the same projection onto $[l, u]$.
 
-`Solver(P, A)` forms $H = P + \sigma I + A^\top \operatorname{diag}(\rho) A$ and
+`Solver(P, A)` forms $H = P + \sigma I + A^\top \mathrm{diag}(\rho) A$ and
 factors it once with a Cholesky. Every ADMM iteration, every $(q, l, u)$,
 `solve_batch`, and `solve_sequence` reuse that one triangular factor. A single scalar
 `step` is mapped over a family with `jax.vmap` and driven by a compiled
 `jax.lax.while_loop`; `solve_sequence` threads an ordered warm-started family through
 a single `jax.lax.scan`. $\rho$ is fixed and may be scalar or diagonal.
 
-### Preconditioning
+## Preconditioning
 
 ![The same QP under raw and equilibrated ADMM metrics.](assets/preconditioning.png)
 
@@ -36,12 +36,12 @@ both: the default takes 7256 iterations to reach
 $\lVert x^k - x^\star\rVert_2 < 10^{-5}$, and the best of a 49-point grid still takes
 174 — tuning moves the bottleneck from one row to the other instead of removing it.
 Equilibrate the rows, or equivalently pass that same rescaling as the diagonal ADMM
-penalty $\operatorname{diag}(0.01, 100)$; the two runs trace the same trajectory to
+penalty $\mathrm{diag}(0.01, 100)$; the two runs trace the same trajectory to
 $7\times10^{-16}$ and finish in 23. Preconditioning is the choice of a coordinate
 system, or a metric, in which the problem is isotropic; for a first-order method that
 choice is not a detail, it is most of the cost.
 
-### Install
+## Install
 
 Python 3.12 and [uv](https://docs.astral.sh/uv/):
 
@@ -53,7 +53,7 @@ uv run python -c "import splitqp; print(splitqp.Solver)"
 `uv sync --extra cuda` installs the optional CUDA backend; CPU float64 is the
 canonical numerical setting.
 
-### Usage
+## Usage
 
 ```python
 import splitqp
@@ -69,7 +69,7 @@ result.status         # "solved" | "max_iter" | "numerical_error" | "invalid_pro
 solver.factorizations # 1 after construction
 ```
 
-### Notebook
+## Notebook
 
 [`Preconditioning.ipynb`](Preconditioning.ipynb) builds a small ordered family from
 one factorization and solves it with `solve`, `solve_batch`, and `solve_sequence`,
@@ -88,7 +88,7 @@ uv run --group bench python bench.py          # portfolio + one synthetic family
 uv run --group bench python bench.py --full   # more families
 ```
 
-### Limitations
+## Limitations
 
 - dense, well-scaled convex QPs only; a fixed scalar or diagonal $\rho$ and fixed
   $P, A$ after construction;
@@ -99,7 +99,7 @@ uv run --group bench python bench.py --full   # more families
 - non-finite iterates surface as `numerical_error` and invalid or non-convex data
   as `invalid_problem`; neither is returned as a successful solve.
 
-### References
+## References
 
 - [Boyd et al., *Distributed Optimization and Statistical Learning via the
   Alternating Direction Method of Multipliers*](https://web.stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf)
