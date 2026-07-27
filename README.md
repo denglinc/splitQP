@@ -15,9 +15,8 @@ is what is left.
 
 ## quick start
 
-You do not have to run anything. [`Preconditioning.ipynb`](Preconditioning.ipynb) is
-committed with its output — iteration logs, assertions, the figure above — and GitHub
-renders it as it is. It solves a 24-member QP family off one factorization, then runs
+[`Preconditioning.ipynb`](Preconditioning.ipynb) is with its output: iteration logs, assertions, the figure above. 
+It solves a 24-member QP family off one factorization, then runs
 the experiment above and prints the logs behind it.
 
 To run it yourself you need Python 3.12 and [uv](https://docs.astral.sh/uv/):
@@ -58,7 +57,7 @@ solver.factorizations # 1 after construction
 through one `jax.lax.scan`. All of it is in
 [`src/splitqp/solver.py`](src/splitqp/solver.py).
 
-## Preconditioning
+## preconditioning
 
 ADMM's $x$-update is exact: splitQP factors $P + \sigma I + A^\top\mathrm{diag}(\rho)A$
 once and solves with it every iteration. What no factorization can fix is the ratio
@@ -80,7 +79,7 @@ Preconditioning is the choice of a coordinate system, or a metric, in which the
 problem is isotropic; for a first-order method that choice is not a detail, it is
 most of the cost. splitQP does not make it for you — it only lets you state it.
 
-## Limitation
+## limitation
 
 - not OSQP: no automatic scaling or Ruiz equilibration, no adaptive $\rho$, no
   infeasibility certificate, no polishing, no sparse matrices, no autodiff, no custom
