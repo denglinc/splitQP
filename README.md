@@ -109,3 +109,10 @@ most of the cost. splitQP does not make it for you — it only lets you state it
   for the transform and factor/solve patterns.
 - [qpbenchmark](https://github.com/qpsolvers/qpbenchmark) if you want a real solver
   benchmark.
+
+## sibling
+
+[barrierQP](https://github.com/denglinc/barrierQP) is the same problem class from the
+other direction — a Mehrotra predictor–corrector interior-point method, where the one
+factorization is a KKT matrix per iteration and the corrector reuses it as a second
+right-hand side.
