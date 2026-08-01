@@ -19,10 +19,17 @@ is what is left.
 It solves a 24-member QP family off one factorization, then runs
 the experiment above and prints the logs behind it.
 
+[`pipg/PIPG.ipynb`](pipg/PIPG.ipynb), *Factorization or Feedback? From ADMM
+to PIPG*, keeps this solver unchanged and asks when the reusable implicit solve
+should instead be replaced by explicit proportional-integral primal-dual
+feedback. It develops PIPGeq, general-cone PIPG, xPIPG, infeasibility signals,
+and projection-preserving preconditioning as notebook-local JAX experiments.
+
 To run it yourself you need Python 3.12 and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv run --group demo jupyter lab Preconditioning.ipynb
+uv run --group demo jupyter lab pipg/PIPG.ipynb
 ```
 
 CPU float64 is canonical; `uv sync --extra cuda` adds the optional CUDA backend.
