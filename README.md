@@ -25,6 +25,17 @@ should instead be replaced by explicit proportional-integral primal-dual
 feedback. It develops PIPGeq, general-cone PIPG, xPIPG, infeasibility signals,
 and projection-preserving preconditioning as notebook-local JAX experiments.
 
+Interestingly, customized PIPG has also been developed for real-time
+onboard powered-descent guidance. [AIAA
+2023-2003](https://doi.org/10.2514/6.2023-2003) embeds it within
+sequential conic optimization for 6-DoF rocket landing, and the later
+[study](https://arxiv.org/abs/2508.10439) reports the generated C
+solver running on the NASA SPLICE Descent and Landing Computer in
+hardware-in-the-loop tests. The companion
+[Convexification](https://github.com/denglinc/Convexification) repository
+explores the trajectory-optimization formulations behind this class of
+structured convex subproblem.
+
 To run it yourself you need Python 3.12 and [uv](https://docs.astral.sh/uv/):
 
 ```bash
